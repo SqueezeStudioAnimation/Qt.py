@@ -289,6 +289,92 @@ def _pyside():
     return PySide
 
 
+def _katana():
+    # Attempt to set sip API v2 (must be done prior to importing PyQt4)
+    # import sip
+    # try:
+    #     sip.setapi("QString", 2)
+    #     sip.setapi("QVariant", 2)
+    #     sip.setapi("QDate", 2)
+    #     sip.setapi("QDateTime", 2)
+    #     sip.setapi("QTextStream", 2)
+    #     sip.setapi("QTime", 2)
+    #     sip.setapi("QUrl", 2)
+    # except AttributeError:
+    #     raise ImportError
+    #     # PyQt4 < v4.6
+    # except ValueError:
+    #     # API version already set to v1
+    #     raise ImportError
+    #
+    # import PyQt4.Qt
+    import Katana
+    from Katana import QtCore, QtGui
+
+    class ProxyModule(object):
+        """
+        Since Katana have mechanism to prevent monkey-patching, using a proxy is the only way
+        of customizing Qt behavior.
+        """
+        def __init__(self, module):
+            self.__module = module
+
+        def __getattr__(self, item):
+            return getattr(self.__module, item)
+
+    class PyQt4Proxy(object):
+        def __init__(self):
+            self.__qt_core = ProxyModule(Katana.QtCore)
+            self.__qt_gui = ProxyModule(Katana.QtGui)
+
+        @property
+        def QtCore(self):
+            return self.__qt_core
+
+        @property
+        def QtGui(self):
+            return self.__qt_gui
+
+    proxy = PyQt4Proxy()
+
+    _remap(proxy, "QtWidgets", QtGui)
+    _remap(proxy.QtCore, "Signal", QtCore.pyqtSignal)
+    _remap(proxy.QtCore, "Slot", QtCore.pyqtSlot)
+    _remap(proxy.QtCore, "Property", QtCore.pyqtProperty)
+    _remap(proxy.QtCore, "QItemSelection", QtGui.QItemSelection)
+    _remap(proxy.QtCore, "QStringListModel", QtGui.QStringListModel)
+    _remap(proxy.QtCore, "QItemSelectionModel", QtGui.QItemSelectionModel)
+    _remap(proxy.QtCore, "QSortFilterProxyModel", QtGui.QSortFilterProxyModel)
+    _remap(proxy.QtCore, "QAbstractProxyModel", QtGui.QAbstractProxyModel)
+
+    # try:
+    #     from Katana import QtWebKit
+    #     _remap(Katana, "QtWebKitWidgets", QtWebKit)
+    # except ImportError:
+    #     "QtWebkit is optional in Qt , therefore might not be available"
+
+    _add(QtCompat, "__binding__", 'Katana')
+    _add(QtCompat, "__binding_version__", Katana.QtCore.PYQT_VERSION_STR)
+    _add(QtCompat, "__qt_version__", Katana.QtCore.QT_VERSION_STR)
+    # _add(QtCompat, "load_ui", lambda fname: uic.loadUi(fname))
+    _add(QtCompat, "setSectionResizeMode", QtGui.QHeaderView.setResizeMode)
+
+    # PySide2 differs from Qt4 in that Qt4 has one extra argument
+    # which is always `None`. The lambda arguments represents the PySide2
+    # interface, whereas the arguments passed to `.translate` represent
+    # those expected of a Qt4 binding.
+    _add(QtCompat, "translate",
+         lambda context, sourceText, disambiguation, n:
+         QtCore.QCoreApplication.translate(context,
+                                           sourceText,
+                                           disambiguation,
+                                           QtCore.QCoreApplication.CodecForTr,
+                                           n))
+
+    _maintain_backwards_compatibility(proxy)
+
+    return proxy
+
 def _log(text, verbose):
     if verbose:
         sys.stdout.write(text + "\n")
@@ -362,7 +448,7 @@ def init():
 
     """
 
-    bindings = (_pyside2, _pyqt5, _pyside, _pyqt4)
+    bindings = (_pyside2, _pyqt5, _pyside, _pyqt4, _katana)
 
     if QT_PREFERRED_BINDING:
         # Internal flag (used in installer)
@@ -375,7 +461,8 @@ def init():
             "PySide2": _pyside2,
             "PyQt5": _pyqt5,
             "PySide": _pyside,
-            "PyQt4": _pyqt4
+            "PyQt4": _pyqt4,
+            "Katana": _katana,
         }
 
         try:
