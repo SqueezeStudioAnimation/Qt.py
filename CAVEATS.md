@@ -8,6 +8,10 @@ There are cases where Qt.py is not handling incompatibility issues.
 - [QtWidgets.QAction.triggered](#qtwidgetsqactiontriggered)
 - [QtGui.QRegExpValidator](#qtguiqregexpvalidator)
 - [QtWidgets.QHeaderView.setResizeMode](#qtwidgetsqheaderviewsetresizemode)
+- [QtWidgets.qApp](#qtwidgetsqapp)
+- [QtCompat.wrapInstance](#qtcompatwrapinstance)
+- [QtGui.QPixmap.grabWidget](#qtguiqpixmapgrabwidget)
+- [QtCore.qInstallMessageHandler](#qtcoreqinstallmessagehandler)
 
 <br>
 <br>
@@ -60,7 +64,7 @@ True
 
 I had been using the id as an index into a list. But the unexpected return value from PyQt4 broke it by being invalid. The workaround was to always check that the returned id was between 0 and the max size I expect.  
 
-– @justinfx
+\- @justinfx
 
 
 <br>
@@ -121,15 +125,15 @@ PySide allows for a `result=None` keyword param to set the return type. PyQt4 cr
 
 ```python
 # PySide
->>> from Qt import QtCore, QtGui
->>> slot = QtCore.Slot(QtGui.QWidget, result=None)
+>>> from Qt import QtCore, QtWidgets
+>>> slot = QtCore.Slot(QtWidgets.QWidget, result=None)
 ```
 
 ```python
 # PyQt4, Python2
->>> from Qt import QtCore, QtGui
->>> slot = QtCore.Slot(QtGui.QWidget)
->>> slot = QtCore.Slot(QtGui.QWidget, result=None)
+>>> from Qt import QtCore, QtWidgets
+>>> slot = QtCore.Slot(QtWidgets.QWidget)
+>>> slot = QtCore.Slot(QtWidgets.QWidget, result=None)
 Traceback (most recent call last):
 ...
 TypeError: string or ASCII unicode expected not 'NoneType'
@@ -137,9 +141,9 @@ TypeError: string or ASCII unicode expected not 'NoneType'
 
 ```python
 # PyQt4, Python3
->>> from Qt import QtCore, QtGui
->>> slot = QtCore.Slot(QtGui.QWidget)
->>> slot = QtCore.Slot(QtGui.QWidget, result=None)
+>>> from Qt import QtCore, QtWidgets
+>>> slot = QtCore.Slot(QtWidgets.QWidget)
+>>> slot = QtCore.Slot(QtWidgets.QWidget, result=None)
 Traceback (most recent call last):
 ...
 TypeError: bytes or ASCII string expected not 'NoneType'
@@ -155,8 +159,10 @@ TypeError: bytes or ASCII string expected not 'NoneType'
 
 PySide cannot accept any arguments. In PyQt4, `QAction.triggered` signal requires a bool arg.
 
+**Note**: This is not included on our tests, as we cannot reproduce this using PyQt4 4.11.4, CY2017. It's likely that this issue persists in e.g. Maya version < 2017.
+
 ```python
-# PySide
+# PySide, untested
 >>> from Qt import QtCore, QtWidgets
 >>> obj = QtCore.QObject()
 >>> action = QtWidgets.QAction(obj)
@@ -169,7 +175,7 @@ TypeError: triggered() only accepts 0 arguments, 2 given!
 ```
 
 ```python
-# PyQt4
+# PyQt4, untested
 >>> from Qt import QtCore, QtWidgets
 >>> obj = QtCore.QObject()
 >>> action = QtWidgets.QAction(obj)
@@ -262,7 +268,7 @@ Use compatibility wrapper.
 >>> app = QtWidgets.QApplication(sys.argv)
 >>> view = QtWidgets.QTreeWidget()
 >>> header = view.header()
->>> QtCompat.setSectionResizeMode(header, QtWidgets.QHeaderView.Fixed)
+>>> QtCompat.QHeaderView.setSectionResizeMode(header, QtWidgets.QHeaderView.Fixed)
 ```
 
 Or a conditional.
@@ -277,4 +283,107 @@ Or a conditional.
 ...   header.setResizeMode(QtWidgets.QHeaderView.Fixed)
 ... else:
 ...   header.setSectionResizeMode(QtWidgets.QHeaderView.Fixed)
+```
+
+Note: Qt.QtCompat.setSectionResizeMode is a older way this was handled and has been left in for now, but this will likely be removed in the future.
+
+<br>
+<br>
+
+#### QtWidgets.qApp
+
+`qApp` is not included in Qt.py due to the way Qt keeps this up to date with the currently active QApplication.
+
+Qt implicitly updates this variable through monkey patching whenever a new QApplication is instantiated. This means that our variable quickly goes out of date and is not updated at the same time.
+
+```python
+# PySide2
+>>> from Qt import QtWidgets
+>>> "qApp" in dir(QtWidgets)
+False
+```
+
+##### Workaround
+
+Use `QApplication.instance()` instead.
+
+Technically, there is no difference between the two, apart from more characters to type.
+
+```python
+# PySide2
+>>> from Qt import QtWidgets
+>>> app = QtWidgets.QApplication(sys.argv)
+>>> app == QtWidgets.QApplication.instance()
+True
+```
+
+
+#### QtCompat.wrapInstance
+
+`QtCompat.wrapInstance` differs across `sip` and `shiboken` in subtle ways.
+
+**Note**: This is not included on our tests, as we cannot reproduce this using PySide2 (build commit date `2017-08-25`), CY2018. It's likely that this issue persists in e.g. Maya version < 2018.
+
+```python
+# PySide2, untested
+>>> from Qt import QtCompat, QtWidgets
+>>> app = QtWidgets.QApplication(sys.argv)
+>>> button = QtWidgets.QPushButton("Hello world")
+>>> button.setObjectName("MySpecialButton")
+>>> pointer = QtCompat.getCppPointer(button)
+>>> widget = QtCompat.wrapInstance(long(pointer))
+>>> assert isinstance(widget, QtWidgets.QWidget), widget
+>>> assert widget.objectName() == button.objectName()
+>>> widget == button
+False
+```
+
+```python
+# PyQt5
+>>> from Qt import QtCompat, QtWidgets
+>>> app = QtWidgets.QApplication(sys.argv)
+>>> button = QtWidgets.QPushButton("Hello world")
+>>> button.setObjectName("MySpecialButton")
+>>> pointer = QtCompat.getCppPointer(button)
+>>> widget = QtCompat.wrapInstance(long(pointer))
+>>> assert isinstance(widget, QtWidgets.QWidget), widget
+>>> assert widget.objectName() == button.objectName()
+>>> widget == button
+True
+```
+
+Note the `False` for PySide2 and `True` for PyQt5.
+
+#### QtGui.QPixmap.grabWidget
+
+The method of capturing a widget to a pixmap changed between Qt4 and Qt5.
+
+PySide and PyQt4:
+```python
+# PySide
+>>> from Qt import QtGui, QtWidgets
+>>> app = QtWidgets.QApplication(sys.argv)
+>>> button = QtWidgets.QPushButton("Hello world")
+>>> pixmap = QtGui.QPixmap.grabWidget(button)
+```
+
+PySide2 and PyQt5
+```python
+# PySide2
+>>> from Qt import QtGui, QtWidgets
+>>> app = QtWidgets.QApplication(sys.argv)
+>>> button = QtWidgets.QPushButton("Hello world")
+>>> pixmap = button.grab()
+```
+
+##### Workaround
+
+Use compatibility wrapper.
+
+```python
+# PySide2
+>>> from Qt import QtCompat, QtWidgets
+>>> app = QtWidgets.QApplication(sys.argv)
+>>> button = QtWidgets.QPushButton("Hello world")
+>>> pixmap = QtCompat.QWidget.grab(button)
 ```

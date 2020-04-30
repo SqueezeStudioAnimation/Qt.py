@@ -1,5 +1,4 @@
 """Tests that run once"""
-
 import io
 import os
 import sys
@@ -7,6 +6,12 @@ import imp
 import shutil
 import tempfile
 import subprocess
+import contextlib
+import datetime
+import json
+
+# Third-party dependency
+import six
 
 from nose.tools import (
     assert_raises,
@@ -14,23 +19,55 @@ from nose.tools import (
 
 PYTHON = sys.version_info[0]  # e.g. 2 or 3
 
+try:
+    long
+except NameError:
+    # Python 3 compatibility
+    long = int
+
+
+def _pyside2_commit_date():
+    """Return the commit date of PySide2"""
+
+    import PySide2
+    if hasattr(PySide2, '__build_commit_date__'):
+        commit_date = PySide2.__build_commit_date__
+        datetime_object = datetime.datetime.strptime(
+            commit_date[: commit_date.rfind('+')], '%Y-%m-%dT%H:%M:%S'
+        )
+        return datetime_object
+    else:
+        # Returns None if no __build_commit_date__ is available
+        return None
+
+
+@contextlib.contextmanager
+def captured_output():
+    new_out, new_err = six.StringIO(), six.StringIO()
+    old_out, old_err = sys.stdout, sys.stderr
+    try:
+        sys.stdout, sys.stderr = new_out, new_err
+        yield sys.stdout, sys.stderr
+    finally:
+        sys.stdout, sys.stderr = old_out, old_err
+
+
+def CustomWidget(parent=None):
+    """
+    Wrap CustomWidget class into a function to avoid global Qt import
+    """
+    from Qt import QtWidgets
+
+    class Widget(QtWidgets.QWidget):
+        pass
+
+    return Widget(parent)
+
 
 self = sys.modules[__name__]
 
 
-def setup():
-    """Module-wide initialisation
-
-    This function runs once, followed by teardown() below once
-    all tests have completed.
-
-    """
-
-    self.tempdir = tempfile.mkdtemp()
-    self.ui_qwidget = os.path.join(self.tempdir, "qwidget.ui")
-
-    with io.open(self.ui_qwidget, "w", encoding="utf-8") as f:
-        f.write(u"""\
+qwidget_ui = u"""\
 <?xml version="1.0" encoding="UTF-8"?>
 <ui version="4.0">
  <class>Form</class>
@@ -39,8 +76,8 @@ def setup():
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>235</width>
-    <height>149</height>
+    <width>507</width>
+    <height>394</height>
    </rect>
   </property>
   <property name="windowTitle">
@@ -50,12 +87,181 @@ def setup():
    <item row="0" column="0">
     <widget class="QLineEdit" name="lineEdit"/>
    </item>
+   <item row="1" column="0">
+    <widget class="QLabel" name="label">
+     <property name="text">
+      <string>TextLabel</string>
+     </property>
+    </widget>
+   </item>
+   <item row="2" column="0">
+    <widget class="QLineEdit" name="lineEdit_2"/>
+   </item>
+  </layout>
+ </widget>
+ <resources/>
+ <connections>
+  <connection>
+   <sender>lineEdit</sender>
+   <signal>textChanged(QString)</signal>
+   <receiver>label</receiver>
+   <slot>setText(QString)</slot>
+   <hints>
+    <hint type="sourcelabel">
+     <x>228</x>
+     <y>23</y>
+    </hint>
+    <hint type="destinationlabel">
+     <x>37</x>
+     <y>197</y>
+    </hint>
+   </hints>
+  </connection>
+ </connections>
+</ui>
+"""
+
+
+qmainwindow_ui = u"""\
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>MainWindow</class>
+ <widget class="QMainWindow" name="MainWindow">
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>238</width>
+    <height>44</height>
+   </rect>
+  </property>
+  <property name="windowTitle">
+   <string>MainWindow</string>
+  </property>
+  <widget class="QWidget" name="centralwidget">
+   <layout class="QVBoxLayout" name="verticalLayout">
+    <item>
+     <widget class="QLineEdit" name="lineEdit"/>
+    </item>
+   </layout>
+  </widget>
+ </widget>
+ <resources/>
+ <connections/>
+</ui>
+"""
+
+
+qdialog_ui = u"""\
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>Dialog</class>
+ <widget class="QDialog" name="Dialog">
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>186</width>
+    <height>38</height>
+   </rect>
+  </property>
+  <property name="windowTitle">
+   <string>Dialog</string>
+  </property>
+  <layout class="QVBoxLayout" name="verticalLayout">
+   <item>
+    <widget class="QLineEdit" name="lineEdit"/>
+   </item>
   </layout>
  </widget>
  <resources/>
  <connections/>
 </ui>
-""")
+"""
+
+
+qdockwidget_ui = u"""\
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>DockWidget</class>
+ <widget class="QDockWidget" name="DockWidget">
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>169</width>
+    <height>60</height>
+   </rect>
+  </property>
+  <property name="windowTitle">
+   <string>DockWidget</string>
+  </property>
+  <widget class="QWidget" name="dockWidgetContents">
+   <layout class="QVBoxLayout" name="verticalLayout">
+    <item>
+     <widget class="QLineEdit" name="lineEdit"/>
+    </item>
+   </layout>
+  </widget>
+ </widget>
+ <resources/>
+ <connections/>
+</ui>
+"""
+
+
+qcustomwidget_ui = u"""\
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>MainWindow</class>
+ <widget class="QMainWindow" name="MainWindow">
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>238</width>
+    <height>44</height>
+   </rect>
+  </property>
+  <property name="windowTitle">
+   <string>MainWindow</string>
+  </property>
+  <widget class="CustomWidget" name="customwidget">
+  </widget>
+ </widget>
+ <customwidgets>
+  <customwidget>
+   <class>CustomWidget</class>
+   <extends>QWidget</extends>
+   <header>tests.h</header>
+  </customwidget>
+ </customwidgets>
+ <resources/>
+ <connections/>
+</ui>
+"""
+
+
+def setup():
+    """Module-wide initialisation
+
+    This function runs once, followed by teardown() below once
+    all tests have completed.
+
+    """
+    self.tempdir = tempfile.mkdtemp()
+
+    def saveUiFile(filename, ui_template):
+        filename = os.path.join(self.tempdir, filename)
+        with io.open(filename, "w", encoding="utf-8") as f:
+            f.write(ui_template)
+        return filename
+
+    self.ui_qwidget = saveUiFile("qwidget.ui", qwidget_ui)
+    self.ui_qmainwindow = saveUiFile("qmainwindow.ui", qmainwindow_ui)
+    self.ui_qdialog = saveUiFile("qdialog.ui", qdialog_ui)
+    self.ui_qdockwidget = saveUiFile("qdockwidget.ui", qdockwidget_ui)
+    self.ui_qcustomwidget = saveUiFile("qcustomwidget.ui", qcustomwidget_ui)
 
 
 def teardown():
@@ -75,10 +281,33 @@ def binding(binding):
     return os.getenv("QT_PREFERRED_BINDING") == binding
 
 
-def test_environment():
-    """Tests require all bindings to be installed"""
+@contextlib.contextmanager
+def ignoreQtMessageHandler(msgs):
+    """A context that ignores specific qMessages for all bindings
 
-    imp.find_module("PySide")
+    Args:
+        msgs: list of message strings to ignore
+    """
+    from Qt import QtCompat
+
+    def messageOutputHandler(msgType, logContext, msg):
+        if msg in msgs:
+            return
+        sys.stderr.write("{0}\n".format(msg))
+
+    QtCompat.qInstallMessageHandler(messageOutputHandler)
+    try:
+        yield
+    finally:
+        QtCompat.qInstallMessageHandler(None)
+
+
+def test_environment():
+    """Tests require all bindings to be installed (except PySide on py3.5+)"""
+
+    if sys.version_info <= (3, 4):
+        # PySide is not available for Python > 3.4
+        imp.find_module("PySide")
     imp.find_module("PySide2")
     imp.find_module("PyQt4")
     imp.find_module("PyQt5")
@@ -88,10 +317,198 @@ def test_load_ui_returntype():
     """load_ui returns an instance of QObject"""
 
     import sys
-    from Qt import QtWidgets, QtCore, load_ui
+    from Qt import QtWidgets, QtCore, QtCompat
     app = QtWidgets.QApplication(sys.argv)
-    obj = load_ui(self.ui_qwidget)
+    obj = QtCompat.loadUi(self.ui_qwidget)
     assert isinstance(obj, QtCore.QObject)
+    app.exit()
+
+
+def test_load_ui_baseinstance():
+    """Tests to see if the baseinstance loading loads a QWidget on properly"""
+    import sys
+    from Qt import QtWidgets, QtCompat
+    app = QtWidgets.QApplication(sys.argv)
+    win = QtWidgets.QWidget()
+    QtCompat.loadUi(self.ui_qwidget, win)
+    assert hasattr(win, 'lineEdit'), "loadUi could not load instance to win"
+    app.exit()
+
+
+def test_load_ui_signals():
+    """Tests to see if the baseinstance connects signals properly"""
+    import sys
+    from Qt import QtWidgets, QtCompat
+    app = QtWidgets.QApplication(sys.argv)
+    win = QtWidgets.QWidget()
+    QtCompat.loadUi(self.ui_qwidget, win)
+
+    win.lineEdit.setText('Hello')
+    assert str(win.label.text()) == 'Hello', "lineEdit signal did not fire"
+
+    app.exit()
+
+
+def test_load_ui_mainwindow():
+    """Tests to see if the baseinstance loading loads a QMainWindow properly"""
+    import sys
+    from Qt import QtWidgets, QtCompat
+
+    app = QtWidgets.QApplication(sys.argv)
+    win = QtWidgets.QMainWindow()
+
+    QtCompat.loadUi(self.ui_qmainwindow, win)
+
+    assert hasattr(win, 'lineEdit'), \
+        "loadUi could not load instance to main window"
+
+    app.exit()
+
+
+def test_load_ui_dialog():
+    """Tests to see if the baseinstance loading loads a QDialog properly"""
+    import sys
+    from Qt import QtWidgets, QtCompat
+
+    app = QtWidgets.QApplication(sys.argv)
+    win = QtWidgets.QDialog()
+
+    QtCompat.loadUi(self.ui_qdialog, win)
+
+    assert hasattr(win, 'lineEdit'), \
+        "loadUi could not load instance to main window"
+
+    app.exit()
+
+
+def test_load_ui_dockwidget():
+    """Tests to see if the baseinstance loading loads a QDockWidget properly"""
+    import sys
+    from Qt import QtWidgets, QtCompat
+
+    app = QtWidgets.QApplication(sys.argv)
+    win = QtWidgets.QDockWidget()
+
+    QtCompat.loadUi(self.ui_qdockwidget, win)
+
+    assert hasattr(win, 'lineEdit'), \
+        "loadUi could not load instance to main window"
+
+    app.exit()
+
+
+def test_load_ui_customwidget():
+    """Tests to see if loadUi loads a custom widget properly"""
+    import sys
+    from Qt import QtWidgets, QtCompat
+
+    app = QtWidgets.QApplication(sys.argv)
+    win = QtWidgets.QMainWindow()
+
+    QtCompat.loadUi(self.ui_qcustomwidget, win)
+
+    # Ensure that the derived class was properly created
+    # and not the base class (in case of failure)
+    custom_class_name = getattr(win, "customwidget", None).__class__.__name__
+    excepted_class_name = CustomWidget(win).__class__.__name__
+    assert custom_class_name == excepted_class_name, \
+        "loadUi could not load custom widget to main window"
+
+    app.exit()
+
+
+def test_load_ui_invalidpath():
+    """Tests to see if loadUi successfully fails on invalid paths"""
+    import sys
+    from Qt import QtWidgets, QtCompat
+    app = QtWidgets.QApplication(sys.argv)
+    assert_raises(IOError, QtCompat.loadUi, 'made/up/path')
+    app.exit()
+
+
+def test_load_ui_invalidxml():
+    """Tests to see if loadUi successfully fails on invalid ui files"""
+    import sys
+    invalid_xml = os.path.join(self.tempdir, "invalid.ui")
+    with io.open(invalid_xml, "w", encoding="utf-8") as f:
+        f.write(u"""
+        <?xml version="1.0" encoding="UTF-8"?>
+        <ui version="4.0" garbage
+        </ui>
+        """)
+
+    from xml.etree import ElementTree
+    from Qt import QtWidgets, QtCompat
+    app = QtWidgets.QApplication(sys.argv)
+    assert_raises(ElementTree.ParseError, QtCompat.loadUi, invalid_xml)
+    app.exit()
+
+
+def test_load_ui_existingLayoutOnDialog():
+    """Tests to see if loading a ui onto a layout in a Dialog works"""
+    import sys
+    from Qt import QtWidgets, QtCompat
+
+    msgs = 'QLayout: Attempting to add QLayout "" to QDialog ' \
+        '"Dialog", which already has a layout'
+
+    with ignoreQtMessageHandler([msgs]):
+        app = QtWidgets.QApplication(sys.argv)
+        win = QtWidgets.QDialog()
+        QtWidgets.QComboBox(win)
+        QtWidgets.QHBoxLayout(win)
+        QtCompat.loadUi(self.ui_qdialog, win)
+    app.exit()
+
+
+def test_load_ui_existingLayoutOnMainWindow():
+    """Tests to see if loading a ui onto a layout in a MainWindow works"""
+    import sys
+    from Qt import QtWidgets, QtCompat
+
+    msgs = 'QLayout: Attempting to add QLayout "" to QMainWindow ' \
+        '"", which already has a layout'
+
+    with ignoreQtMessageHandler([msgs]):
+        app = QtWidgets.QApplication(sys.argv)
+        win = QtWidgets.QMainWindow()
+        QtWidgets.QComboBox(win)
+        QtWidgets.QHBoxLayout(win)
+        QtCompat.loadUi(self.ui_qmainwindow, win)
+    app.exit()
+
+
+def test_load_ui_existingLayoutOnDockWidget():
+    """Tests to see if loading a ui onto a layout in a DockWidget works"""
+    import sys
+    from Qt import QtWidgets, QtCompat
+
+    msgs = 'QLayout: Attempting to add QLayout "" to QDockWidget ' \
+        '"", which already has a layout'
+
+    with ignoreQtMessageHandler([msgs]):
+        app = QtWidgets.QApplication(sys.argv)
+        win = QtWidgets.QDockWidget()
+        QtWidgets.QComboBox(win)
+        QtWidgets.QHBoxLayout(win)
+        QtCompat.loadUi(self.ui_qdockwidget, win)
+    app.exit()
+
+
+def test_load_ui_existingLayoutOnWidget():
+    """Tests to see if loading a ui onto a layout in a Widget works"""
+    import sys
+    from Qt import QtWidgets, QtCompat
+
+    msgs = 'QLayout: Attempting to add QLayout "" to QWidget ' \
+        '"Form", which already has a layout'
+
+    with ignoreQtMessageHandler([msgs]):
+        app = QtWidgets.QApplication(sys.argv)
+        win = QtWidgets.QWidget()
+        QtWidgets.QComboBox(win)
+        QtWidgets.QHBoxLayout(win)
+        QtCompat.loadUi(self.ui_qwidget, win)
     app.exit()
 
 
@@ -134,11 +551,15 @@ def test_vendoring():
     shutil.copy(os.path.join(os.path.dirname(__file__), "Qt.py"),
                 os.path.join(vendor, "Qt.py"))
 
+    # Copy real Qt.py into the root folder
+    shutil.copy(os.path.join(os.path.dirname(__file__), "Qt.py"),
+                os.path.join(self.tempdir, "Qt.py"))
+
     print("Testing relative import..")
     assert subprocess.call(
         [sys.executable, "-c", "import myproject"],
         cwd=self.tempdir,
-        stdout=subprocess.PIPE,    # With nose process isolation, buffer can
+        stdout=subprocess.PIPE,  # With nose process isolation, buffer can
         stderr=subprocess.STDOUT,  # easily get full and throw an error.
     ) == 0
 
@@ -158,6 +579,77 @@ def test_vendoring():
         stderr=subprocess.STDOUT,
     ) == 0
 
+    #
+    # Test invalid json data
+    #
+    env = os.environ.copy()
+    env["QT_PREFERRED_BINDING_JSON"] = '{"Qt":["PyQt5","PyQt4"],}'
+
+    cmd = "import myproject.vendor.Qt;"
+    cmd += "import Qt;"
+    cmd += "assert myproject.vendor.Qt.__binding__ != 'None', 'vendor';"
+    cmd += "assert Qt.__binding__ != 'None', 'Qt';"
+
+    popen = subprocess.Popen(
+        [sys.executable, "-c", cmd],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        cwd=self.tempdir,
+        env=env
+    )
+
+    out, err = popen.communicate()
+
+    if popen.returncode != 0:
+        print(out)
+        msg = "An exception was raised"
+        assert popen.returncode == 0, msg
+
+    error_check = b"Qt.py [warning]:"
+    assert err.startswith(error_check), err
+
+    print('out------------------')
+    print(out)
+
+    print('err ------------------')
+    print(err)
+
+    # Check QT_PREFERRED_BINDING_JSON works as expected
+    print("Testing QT_PREFERRED_BINDING_JSON is respected..")
+    cmd = "import myproject.vendor.Qt;"
+    # Check that the "None" binding was set for `import myproject.vendor.Qt`
+    cmd += "assert myproject.vendor.Qt.__binding__ == 'None', 'vendor';"
+    cmd += "import Qt;"
+    # Check that the "None" binding was not set for `import Qt`.
+    # This should be PyQt5 or PyQt4 depending on the test environment.
+    cmd += "assert Qt.__binding__ != 'None', 'Qt'"
+
+    # If the module name is "Qt" use PyQt5 or PyQt4, otherwise use None binding
+    env = os.environ.copy()
+    env["QT_PREFERRED_BINDING_JSON"] = json.dumps(
+        {
+            "Qt": ["PyQt5", "PyQt4"],
+            "default": ["None"]
+        }
+    )
+
+    assert subprocess.call(
+        [sys.executable, "-c", cmd],
+        stdout=subprocess.PIPE,
+        cwd=self.tempdir,
+        env=env
+    ) == 0
+
+    print("Testing QT_PREFERRED_BINDING_JSON and QT_PREFERRED_BINDING work..")
+    env["QT_PREFERRED_BINDING_JSON"] = '{"Qt":["PyQt5","PyQt4"]}'
+    env["QT_PREFERRED_BINDING"] = "None"
+    assert subprocess.call(
+        [sys.executable, "-c", cmd],
+        stdout=subprocess.PIPE,
+        cwd=self.tempdir,
+        env=env
+    ) == 0
+
 
 def test_convert_simple():
     """python -m Qt --convert works in general"""
@@ -174,7 +666,7 @@ class Ui_uic(object):
 """.split("\n")
 
     after = """\
-from Qt import QtCore, QtGui, QtWidgets
+from Qt import QtCompat, QtCore, QtGui, QtWidgets
 
 class Ui_uic(object):
     def setupUi(self, uic):
@@ -182,11 +674,11 @@ class Ui_uic(object):
 
     def retranslateUi(self, uic):
         self.pushButton_2.setText(
-            Qt.QtCompat.translate("uic", "NOT Ok", None, -1))
+            QtCompat.translate("uic", "NOT Ok", None, -1))
 """.split("\n")
 
-    import Qt
-    assert Qt.convert(before) == after, after
+    from Qt import QtCompat
+    assert QtCompat._convert(before) == after, after
 
 
 def test_convert_idempotency():
@@ -204,7 +696,7 @@ class Ui_uic(object):
 """
 
     after = """\
-from Qt import QtCore, QtGui, QtWidgets
+from Qt import QtCompat, QtCore, QtGui, QtWidgets
 
 class Ui_uic(object):
     def setupUi(self, uic):
@@ -212,7 +704,7 @@ class Ui_uic(object):
 
     def retranslateUi(self, uic):
         self.pushButton_2.setText(
-            Qt.QtCompat.translate("uic", "NOT Ok", None, -1))
+            QtCompat.translate("uic", "NOT Ok", None, -1))
 """
 
     fname = os.path.join(self.tempdir, "idempotency.py")
@@ -222,12 +714,12 @@ class Ui_uic(object):
     from Qt import QtCompat
 
     os.chdir(self.tempdir)
-    QtCompat.cli(args=["--convert", "idempotency.py"])
+    QtCompat._cli(args=["--convert", "idempotency.py"])
 
     with open(fname) as f:
         assert f.read() == after
 
-    QtCompat.cli(args=["--convert", "idempotency.py"])
+    QtCompat._cli(args=["--convert", "idempotency.py"])
 
     with open(fname) as f:
         assert f.read() == after
@@ -243,68 +735,23 @@ def test_convert_backup():
     from Qt import QtCompat
 
     os.chdir(self.tempdir)
-    QtCompat.cli(args=["--convert", "idempotency.py"])
+    QtCompat._cli(args=["--convert", "idempotency.py"])
 
     assert os.path.exists(
         os.path.join(self.tempdir, "%s_backup%s" % os.path.splitext(fname))
     )
 
 
-def test_meta_add():
-    """Qt._add() appends to __added__"""
-    from Qt import QtCompat
-
-    module = imp.new_module("QtMock")
-
-    QtCompat._add(module, "MyAttr", None)
-
-    assert "MyAttr" in QtCompat.__added__, QtCompat.__added__
-    assert "MyAttr" not in QtCompat.__remapped__
-    assert "MyAttr" not in QtCompat.__modified__
-
-
-def test_meta_remap():
-    """Qt._remap() appends to __modified__"""
-    from Qt import QtCompat
-
-    module = imp.new_module("QtMock")
-
-    QtCompat._remap(module, "MyAttr", None)
-
-    assert "MyAttr" not in QtCompat.__added__, QtCompat.__added__
-    assert "MyAttr" in QtCompat.__remapped__
-    assert "MyAttr" not in QtCompat.__modified__
-
-
-def test_meta_remap_existing():
-    """Qt._remap() of existing member throws an exception"""
-    from Qt import QtCompat
-
-    module = imp.new_module("QtMock")
-    module.MyAttr = None
-
-    assert_raises(AttributeError, QtCompat._remap, module, "MyAttr", None)
-
-
-def test_meta_force_remap_existing():
-    """Unsafe Qt._remap() of existing member adds to modified"""
-    from Qt import QtCompat
-
-    module = imp.new_module("QtMock")
-    module.MyAttr = 123
-
-    QtCompat._remap(module, "MyAttr", None, safe=False)
-
-    assert "MyAttr" in QtCompat.__remapped__, QtCompat.__remapped__
-    assert "MyAttr" not in QtCompat.__added__
-    assert "MyAttr" in QtCompat.__modified__
-    assert module.MyAttr is None, module.MyAttr
-
-
 def test_import_from_qtwidgets():
     """Fix #133, `from Qt.QtWidgets import XXX` works"""
     from Qt.QtWidgets import QPushButton
     assert QPushButton.__name__ == "QPushButton", QPushButton
+
+
+def test_import_from_qtcompat():
+    """ `from Qt.QtCompat import XXX` works """
+    from Qt.QtCompat import loadUi
+    assert loadUi.__name__ == "_loadUi", loadUi
 
 
 def test_i158_qtcore_direct_import():
@@ -325,98 +772,303 @@ def test_translate_arguments():
     equivalent with an interface like the one found in PySide2.
 
     Reference: https://doc.qt.io/qt-5/qcoreapplication.html#translate
+
     """
 
     import Qt
 
     # This will run on each binding
     result = Qt.QtCompat.translate("CustomDialog",  # context
-                                   "Status",        # sourceText
-                                   None,            # disambiguation
-                                   -1)              # n
+                                   "Status",  # sourceText
+                                   None,  # disambiguation
+                                   -1)  # n
     assert result == u'Status', result
 
 
 def test_binding_and_qt_version():
-    """QtCompat's __binding_version__ and __qt_version__ populated"""
+    """Qt's __binding_version__ and __qt_version__ populated"""
 
+    import Qt
+
+    assert Qt.__binding_version__ != "0.0.0", ("Binding version was not "
+                                               "populated")
+    assert Qt.__qt_version__ != "0.0.0", ("Qt version was not populated")
+
+
+def test_binding_states():
+    """Tests to see if the Qt binding enum states are set properly"""
+    import Qt
+    assert Qt.IsPySide == binding("PySide")
+    assert Qt.IsPySide2 == binding("PySide2")
+    assert Qt.IsPyQt5 == binding("PyQt5")
+    assert Qt.IsPyQt4 == binding("PyQt4")
+
+
+def test_qtcompat_base_class():
+    """Tests to ensure the QtCompat namespace object works as expected"""
+    import sys
+    import Qt
+    from Qt import QtWidgets
     from Qt import QtCompat
+    app = QtWidgets.QApplication(sys.argv)
+    # suppress `local variable 'app' is assigned to but never used`
+    app
+    header = QtWidgets.QHeaderView(Qt.QtCore.Qt.Horizontal)
 
-    assert QtCompat.__binding_version__ != "0.0.0", ("Binding version was not "
-                                                     "populated")
-    assert QtCompat.__qt_version__ != "0.0.0", ("Qt version was not populated")
+    # Spot check compatibility functions
+    QtCompat.QHeaderView.setSectionsMovable(header, False)
+    assert QtCompat.QHeaderView.sectionsMovable(header) is False
+    QtCompat.QHeaderView.setSectionsMovable(header, True)
+    assert QtCompat.QHeaderView.sectionsMovable(header) is True
+
+    # Verify that the grab function actually generates a non-null image
+    button = QtWidgets.QPushButton('TestImage')
+    pixmap = QtCompat.QWidget.grab(button)
+    assert not pixmap.isNull()
+
+
+def test_cli():
+    """Qt.py is available from the command-line"""
+    env = os.environ.copy()
+    env.pop("QT_VERBOSE")  # Do not include debug messages
+
+    popen = subprocess.Popen(
+        [sys.executable, "Qt.py", "--help"],
+        stdout=subprocess.PIPE,
+        env=env
+    )
+
+    out, err = popen.communicate()
+    assert out.startswith(b"usage: Qt.py"), "\n%s" % out
+
+
+def test_membership():
+    """Common members of Qt.py exist in all bindings, excl exceptions"""
+    import Qt
+
+    common_members = Qt._common_members.copy()
+
+    if os.environ.get('VFXPLATFORM') == '2017':
+        # For CY2017, skip the following
+        common_members['QtGui'].remove('QDesktopServices')
+        common_members.pop('QtOpenGL', None)
+        common_members.pop('QtMultimedia', None)
+
+    missing = list()
+    for module, members in common_members.items():
+        missing.extend(
+            member for member in members
+            if not hasattr(getattr(Qt, module), member)
+        )
+
+    binding = Qt.__binding__
+    assert not missing, (
+        "Some members did not exist in {binding}\n{missing}".format(
+            **locals())
+    )
+
+
+def test_missing():
+    """Missing members of Qt.py have been defined with placeholders"""
+    import Qt
+
+    missing_members = Qt._missing_members.copy()
+
+    missing = list()
+    for module, members in missing_members.items():
+
+        mod = getattr(Qt, module)
+        missing.extend(
+            member for member in members
+            if not hasattr(mod, member) or
+            not isinstance(getattr(mod, member), Qt.MissingMember)
+        )
+
+    binding = Qt.__binding__
+    assert not missing, (
+        "Some members did not exist in {binding} as "
+        "a Qt.MissingMember type\n{missing}".format(**locals())
+    )
+
+
+if sys.version_info <= (3, 4):
+    # PySide is not available for Python > 3.4
+    # Shiboken(1) doesn't support Python 3.5
+    # https://github.com/PySide/shiboken-setup/issues/3
+
+    def test_wrapInstance():
+        """.wrapInstance and .getCppPointer is identical across all bindings"""
+        from Qt import QtCompat, QtWidgets
+
+        app = QtWidgets.QApplication(sys.argv)
+
+        try:
+            button = QtWidgets.QPushButton("Hello world")
+            button.setObjectName("MySpecialButton")
+            pointer = QtCompat.getCppPointer(button)
+            widget = QtCompat.wrapInstance(long(pointer),
+                                           QtWidgets.QWidget)
+            assert isinstance(widget, QtWidgets.QWidget), widget
+            assert widget.objectName() == button.objectName()
+
+            # IMPORTANT: this differs across sip and shiboken.
+            if binding("PySide") or binding("PySide2"):
+                assert widget != button
+            else:
+                assert widget == button
+
+        finally:
+            app.exit()
+
+    def test_implicit_wrapInstance():
+        """.wrapInstance doesn't need the `base` argument"""
+        from Qt import QtCompat, QtWidgets
+
+        app = QtWidgets.QApplication(sys.argv)
+
+        try:
+            button = QtWidgets.QPushButton("Hello world")
+            button.setObjectName("MySpecialButton")
+            pointer = QtCompat.getCppPointer(button)
+            widget = QtCompat.wrapInstance(long(pointer))
+            assert isinstance(widget, QtWidgets.QWidget), widget
+            assert widget.objectName() == button.objectName()
+
+            if binding("PySide"):
+                assert widget != button
+            elif binding("PySide2") and _pyside2_commit_date() is None:
+                assert widget != button
+            elif binding("PySide2") and \
+                    _pyside2_commit_date() <= datetime.datetime(
+                        2017, 8, 25):
+                assert widget == button
+            else:
+                assert widget == button
+
+        finally:
+            app.exit()
+
+    def test_isValid():
+        """.isValid and .delete work in all bindings"""
+        from Qt import QtCompat, QtCore
+        obj = QtCore.QObject()
+        assert QtCompat.isValid(obj)
+        QtCompat.delete(obj)
+        assert not QtCompat.isValid(obj)
 
 
 if binding("PyQt4"):
     def test_preferred_pyqt4():
         """QT_PREFERRED_BINDING = PyQt4 properly forces the binding"""
         import Qt
-        assert Qt.__name__ == "PyQt4", ("PyQt4 should have been picked, "
-                                        "instead got %s" % Qt)
+        assert Qt.__binding__ == "PyQt4", (
+            "PyQt4 should have been picked, "
+            "instead got %s" % Qt.__binding__)
 
     def test_sip_api_qtpy():
         """Preferred binding PyQt4 should have sip version 2"""
 
         __import__("Qt")  # Bypass linter warning
         import sip
-        assert sip.getapi("QString") == 2, ("PyQt4 API version should be 2, "
-                                            "instead is %s"
-                                            % sip.getapi("QString"))
+        assert sip.getapi("QString") == 2, (
+            "PyQt4 API version should be 2, "
+            "instead is %s" % sip.getapi("QString"))
 
     if PYTHON == 2:
         def test_sip_api_already_set():
-            """Raise ImportError if sip API v1 was already set"""
-
+            """Raise ImportError with sip was set to 1 with no hint, default"""
             __import__("PyQt4.QtCore")  # Bypass linter warning
             import sip
             sip.setapi("QString", 1)
             assert_raises(ImportError, __import__, "Qt")
+
+        # A sip API hint of any kind bypasses ImportError
+        # on account of it being merely a hint.
+        def test_sip_api_1_1():
+            """sip=1, hint=1 == OK"""
+            import sip
+            sip.setapi("QString", 1)
+            os.environ["QT_SIP_API_HINT"] = "1"
+            __import__("Qt")  # Bypass linter warning
+
+        def test_sip_api_2_1():
+            """sip=2, hint=1 == WARNING"""
+            import sip
+            sip.setapi("QString", 2)
+            os.environ["QT_SIP_API_HINT"] = "1"
+
+            with captured_output() as out:
+                __import__("Qt")  # Bypass linter warning
+                stdout, stderr = out
+                assert stderr.getvalue().startswith("Warning:")
+
+        def test_sip_api_1_2():
+            """sip=1, hint=2 == WARNING"""
+            import sip
+            sip.setapi("QString", 1)
+            os.environ["QT_SIP_API_HINT"] = "2"
+
+            with captured_output() as out:
+                __import__("Qt")  # Bypass linter warning
+                stdout, stderr = out
+                assert stderr.getvalue().startswith("Warning:")
+
+        def test_sip_api_2_2():
+            """sip=2, hint=2 == OK"""
+            import sip
+            sip.setapi("QString", 2)
+            os.environ["QT_SIP_API_HINT"] = "2"
+            __import__("Qt")  # Bypass linter warning
 
 
 if binding("PyQt5"):
     def test_preferred_pyqt5():
         """QT_PREFERRED_BINDING = PyQt5 properly forces the binding"""
         import Qt
-        assert Qt.__name__ == "PyQt5", ("PyQt5 should have been picked, "
-                                        "instead got %s" % Qt)
+        assert Qt.__binding__ == "PyQt5", (
+            "PyQt5 should have been picked, "
+            "instead got %s" % Qt.__binding__)
 
 
 if binding("PySide"):
     def test_preferred_pyside():
         """QT_PREFERRED_BINDING = PySide properly forces the binding"""
         import Qt
-        assert Qt.__name__ == "PySide", ("PySide should have been picked, "
-                                         "instead got %s" % Qt)
+        assert Qt.__binding__ == "PySide", (
+            "PySide should have been picked, "
+            "instead got %s" % Qt.__binding__)
 
 
 if binding("PySide2"):
     def test_preferred_pyside2():
         """QT_PREFERRED_BINDING = PySide2 properly forces the binding"""
         import Qt
-        assert Qt.__name__ == "PySide2", ("PySide2 should have been picked, "
-                                          "instead got %s" % Qt)
+        assert Qt.__binding__ == "PySide2", (
+            "PySide2 should have been picked, "
+            "instead got %s" % Qt.__binding__)
 
     def test_coexistence():
         """Qt.py may be use alongside the actual binding"""
 
         from Qt import QtCore
-        import PySide.QtGui
+        import PySide2.QtGui
 
         # Qt remaps QStringListModel
         assert QtCore.QStringListModel
 
         # But does not delete the original
-        assert PySide.QtGui.QStringListModel
+        assert PySide2.QtGui.QStringListModel
 
 
-if binding("PySide") or binding("PySide2"):
+if binding("PyQt4") or binding("PyQt5"):
     def test_multiple_preferred():
         """QT_PREFERRED_BINDING = more than one binding excludes others"""
 
         # PySide is the more desirable binding
         os.environ["QT_PREFERRED_BINDING"] = os.pathsep.join(
-            ["PySide", "PySide2"])
+            ["PyQt4", "PyQt5"])
 
         import Qt
-        assert Qt.__name__ == "PySide", ("PySide should have been picked, "
-                                         "instead got %s" % Qt)
+        assert Qt.__binding__ == "PyQt4", (
+            "PyQt4 should have been picked, "
+            "instead got %s" % Qt.__binding__)
