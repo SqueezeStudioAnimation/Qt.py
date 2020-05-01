@@ -7,8 +7,6 @@ description = 'Minimal Python 2 & 3 shim around all Qt bindings - PySide, PySide
 
 help = 'https://github.com/SqueezeStudioAnimation/Qt.py'
 
-build_command = "mkdir {root}/build/python/ && cp -f {root}/Qt.py {root}/build/python/Qt.py"
-
 requires = ['python-2']
 
 def commands():
