@@ -10,6 +10,5 @@ help = 'https://github.com/SqueezeStudioAnimation/Qt.py'
 requires = ['python-2']
 
 def commands():
-    env.QT_PREFERRED_BINDING = "PySide2"
     env.PYTHONPATH.append("{root}/build/python")
 
