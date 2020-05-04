@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 name = 'python_qtpy'
 
-version = '1.0.0'
+version = '1.0.1'
 
 description = 'Minimal Python 2 & 3 shim around all Qt bindings - PySide, PySide2, PyQt4 and PyQt5. (SqueezeStudioAnimation fork)'
 
